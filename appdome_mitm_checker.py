@@ -47,11 +47,14 @@ DEFAULT_THREAD_COUNT = 10
 # Global cache to store the results of previous lookups
 HOSTNAME_CACHE = {}
 
-
 def get_ip_address(hostname):
     try:
-        ip_address = socket.gethostbyname(hostname)
-        return ip_address
+        ip_addresses = socket.getaddrinfo(hostname, None)
+        for addrinfo in ip_addresses:
+            ip_version, _, _, _, sockaddr = addrinfo
+            if ip_version == socket.AF_INET or ip_version == socket.AF_INET6:
+                ip_address = sockaddr[0]
+                return ip_address
     except socket.gaierror:
         return None
 
