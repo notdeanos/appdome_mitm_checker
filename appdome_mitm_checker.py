@@ -88,11 +88,12 @@ def get_country(ip_address):
 def check_https_support(hostname):
     try:
         context = ssl.create_default_context()
+        context.set_ciphers('HIGH:!aNULL:!eNULL:!EXPORT:!DES:!RC4:!MD5:!PSK:!SRP:!CAMELLIA')
         with socket.create_connection((hostname, 443), timeout=5) as sock:
             with context.wrap_socket(sock, server_hostname=hostname) as ssock:
+                tls_version = ssock.version()
                 cert = ssock.getpeercert()
                 if cert:
-                    tls_version = ssl.get_protocol_name(ssock.version)
                     return True, tls_version
                 else:
                     return False, "No SSL/TLS certificate found"
@@ -246,4 +247,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
