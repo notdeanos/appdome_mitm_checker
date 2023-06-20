@@ -14,8 +14,7 @@ Arguments:
   <input_file>        Path to the input file containing a list of hostnames to check
   <output_file>       Path to the output file to store the results (default: output_file.csv)
 
-
-  sample input_file:
+  sample input_file (must be FQDN, not IP addresses):
         somehost1.com
         api.somecdn.com
         yetanotherhost.mynetwork.xyz
@@ -24,6 +23,11 @@ Options:
   --verbose           Print detailed progress and debugging information
   --delimiter         Delimiter to use in the output file (default: tab)
   --threads           Number of threads to use for concurrent execution (default: 10)
+
+ Required Python packages:
+ - ipwhois: Used for IP address and ownership lookups
+   Install with: pip install ipwhois
+
 """
 
 import sys
