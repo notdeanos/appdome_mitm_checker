@@ -92,7 +92,8 @@ def check_https_support(hostname):
             with context.wrap_socket(sock, server_hostname=hostname) as ssock:
                 cert = ssock.getpeercert()
                 if cert:
-                    return True, None
+                    tls_version = ssl.get_protocol_name(ssock.version)
+                    return True, tls_version
                 else:
                     return False, "No SSL/TLS certificate found"
     except (socket.gaierror, ssl.SSLError, ConnectionRefusedError) as e:
@@ -103,127 +104,125 @@ def check_https_support(hostname):
         return False, str(e)
 
 
-def check_hsts_support(hostname):
-    try:
-        context = ssl.create_default_context()
-        with socket.create_connection((hostname, 443), timeout=5) as sock:
-            with context.wrap_socket(sock, server_hostname=hostname) as ssock:
-                cert = ssock.getpeercert()
-                if cert and "extensions" in cert:
-                    extensions = cert["extensions"]
-                    if "subjectAltName" in extensions:
-                        subject_alt_name = extensions["subjectAltName"]
-                        for entry in subject_alt_name:
-                            if entry[0] == "DNS" and entry[1] == hostname:
-                                return True, None
-                    return False, "HSTS not supported"
+def process_hostname(hostname, total_hosts, verbose):
+    if hostname in HOSTNAME_CACHE:
+        return HOSTNAME_CACHE[hostname]
+
+    ip_address = get_ip_address(hostname)
+    resolved_domain = ""
+    country = ""
+    owner = None
+    https_support = "Failed"
+    tls_version = ""
+    failure_reason = ""
+
+    if ip_address:
+        owner = get_owner(ip_address)
+        if owner:
+            country = get_country(ip_address)
+            resolved_domain = socket.getfqdn(hostname)
+            supports_https, failure_reason = check_https_support(hostname)
+            if supports_https:
+                if isinstance(supports_https, str):
+                    https_support = "Passed"
+                    tls_version = supports_https
                 else:
-                    return False, "No SSL/TLS certificate found"
-    except (socket.gaierror, ssl.SSLError, ConnectionRefusedError) as e:
-        return False, str(e)
-    except socket.timeout:
-        return False, "Timeout"
-    except Exception as e:
-        return False, str(e)
+                    https_support = "Passed"
 
+    if not owner:
+        owner_from_ip = get_owner_from_ip(ip_address)
+        if owner_from_ip:
+            owner = owner_from_ip
+            country = get_country(ip_address)
+            resolved_domain = socket.getfqdn(hostname)
+            supports_https, failure_reason = check_https_support(hostname)
+            if supports_https:
+                if isinstance(supports_https, str):
+                    https_support = "Passed"
+                    tls_version = supports_https
+                else:
+                    https_support = "Passed"
 
-def check_tls_version(hostname, tls_version):
-    try:
-        context = ssl.create_default_context()
-        context.set_ciphers("DEFAULT@SECLEVEL=1")
-        context.options |= ssl.OP_NO_TLSv1 | ssl.OP_NO_TLSv1_1
-        context.options &= ~ssl.OP_NO_TLSv1_2
-        context.minimium_version = tls_version
-
-        with socket.create_connection((hostname, 443), timeout=5) as sock:
-            with context.wrap_socket(sock, server_hostname=hostname) as ssock:
-                cert = ssock.getpeercert()
-                return True, None
-    except (socket.gaierror, ssl.SSLError, ConnectionRefusedError) as e:
-        return False, str(e)
-    except socket.timeout:
-        return False, "Timeout"
-    except Exception as e:
-        return False, str(e)
-
-
-def process_hostname(hostname, delimiter, verbose):
-    result = []
-    result.append(hostname)
-
-    # Check HTTPS support
-    success, failure_reason = check_https_support(hostname)
-    if success:
-        result.append("HTTPS Supported")
+    if owner:
+        line_output = [hostname, ip_address, country, resolved_domain, owner, https_support, tls_version, failure_reason]
     else:
-        result.append("HTTPS Not Supported")
-        result.append(failure_reason)
-        return result
+        line_output = [
+            hostname,
+            "IP address not found",
+            country,
+            resolved_domain,
+            "Owner information not found",
+            https_support,
+            tls_version,
+            failure_reason,
+        ]
 
-    # Check HSTS support
-    success, failure_reason = check_hsts_support(hostname)
-    if success:
-        result.append("HSTS Supported")
-    else:
-        result.append("HSTS Not Supported")
-        result.append(failure_reason)
+    HOSTNAME_CACHE[hostname] = line_output
 
-    # Check TLS versions
-    tls_versions = ["TLSv1.2", "TLSv1.3"]
-    for tls_version in tls_versions:
-        success, failure_reason = check_tls_version(hostname, tls_version)
-        if success:
-            result.append(tls_version + " Supported")
-        else:
-            result.append(tls_version + " Not Supported")
-            result.append(failure_reason)
+    completed_hosts = len(HOSTNAME_CACHE)
+    percentage_complete = (completed_hosts / total_hosts) * 100
 
-    return result
+    if verbose:
+        logging.info(
+            f"\rProgress: {completed_hosts}/{total_hosts} hosts checked ({percentage_complete:.2f}%) - {hostname}"
+        )
 
-
-def print_result(result):
-    line_output = "\t".join(result)
-    print(line_output)
+    return line_output
 
 
 def process_hostnames(input_file, output_file, delimiter, thread_count, verbose):
-    # Read hostnames from input file
     hostnames = []
     with open(input_file, "r") as file:
-        reader = csv.reader(file, delimiter=delimiter)
-        for row in reader:
-            if row:
-                hostnames.append(row[0])
+        hostnames = file.read().splitlines()
 
-    # Process hostnames concurrently
+    total_hosts = len(hostnames)
+
     with concurrent.futures.ThreadPoolExecutor(max_workers=thread_count) as executor:
-        futures = []
-        for hostname in hostnames:
-            futures.append(executor.submit(process_hostname, hostname, delimiter, verbose))
+        results = []
+        for hostname, result in zip(
+            hostnames,
+            executor.map(
+                process_hostname, hostnames, [total_hosts] * total_hosts, [verbose] * total_hosts
+            ),
+        ):
+            results.append(result)
 
-        # Print results as they become available
-        for future in concurrent.futures.as_completed(futures):
-            result = future.result()
-            print_result(result)
-            sys.stdout.flush()
+    write_output_to_file(output_file, delimiter, results)
 
-            # Write to output file
-            with open(output_file, "a") as file:
-                writer = csv.writer(file, delimiter=delimiter)
-                writer.writerow(result)
+
+def write_output_to_file(output_file, delimiter, results):
+    with open(output_file, "w", newline="") as file:
+        writer = csv.writer(file, delimiter=delimiter)
+        writer.writerow(
+            [
+                "Hostname",
+                "Resolved IP",
+                "Country Code",
+                "Resolved Domain",
+                "Provider Owner",
+                "HTTPS Check",
+                "TLS Version",
+                "Failure Reason",
+            ]
+        )
+        writer.writerows(results)
 
 
 def main():
-    # Parse command-line arguments
-    if len(sys.argv) < 3:
-        print("Usage: python appdome_mitm_checker.py <input_file> <output_file> [--verbose] [--delimiter <delimiter>] [--threads <thread_count>]")
-        sys.exit(1)
+    if len(sys.argv) < 2 or "--help" in sys.argv:
+        print(
+            "Usage: python appdome_mitm_checker.py <input_file> <output_file> [--verbose] [--delimiter <delimiter>] [--threads <thread_count>]"
+        )
+        return
 
     input_file = sys.argv[1]
-    output_file = sys.argv[2]
+    output_file = DEFAULT_OUTPUT_FILE
     delimiter = DEFAULT_DELIMITER
     thread_count = DEFAULT_THREAD_COUNT
     verbose = False
+
+    if len(sys.argv) >= 3:
+        output_file = sys.argv[2]
 
     if "--verbose" in sys.argv:
         verbose = True
@@ -234,17 +233,14 @@ def main():
 
     if "--threads" in sys.argv:
         threads_index = sys.argv.index("--threads")
-        thread_count = int(sys.argv[threads_index + 1])
+        try:
+            thread_count = int(sys.argv[threads_index + 1])
+        except ValueError:
+            print("Error: Invalid thread count specified.")
+            sys.exit(1)
 
-    # Set up logging
-    log_level = logging.DEBUG if verbose else logging.INFO
-    logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s", level=log_level)
+    logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(levelname)s: %(message)s")
 
-    # Clear output file
-    with open(output_file, "w"):
-        pass
-
-    # Process hostnames
     process_hostnames(input_file, output_file, delimiter, thread_count, verbose)
 
 
