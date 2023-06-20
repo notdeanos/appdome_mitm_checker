@@ -1,5 +1,7 @@
+#!/usr/bin/env python3
+
 """
-Dean Mcdonald <dean@appdome.com> (c) Appdome, 2023. 
+Dean Mcdonald <dean@appdome.com> (c) Appdome, 2023.
 
 NO SUPPORT
 
@@ -11,7 +13,7 @@ Usage: python appdome_mitm_chcker.py <input_file> <output_file> [--verbose] [--d
 Arguments:
   <input_file>        Path to the input file containing a list of hostnames to check
   <output_file>       Path to the output file to store the results (default: output_file.csv)
-  
+
 Options:
   --verbose           Print detailed progress and debugging information
   --delimiter         Delimiter to use in the output file (default: tab)
