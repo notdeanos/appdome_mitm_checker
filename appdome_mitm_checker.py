@@ -13,12 +13,14 @@ Typical use case would be checking a list of hosts that trigger Appdome MiTM (Ma
 Usage: python3 appdome_mitm_chcker.py <input_file> <output_file> [--verbose] [--delimiter <delimiter>] [--threads <thread_count>]
 
 Arguments:
-  <input_file>        Path to the input file containing a list of hostnames to check
+  <input_file>        Path to the input file containing a list of hostnames or IP addresses (IPv4 & IPv6 supported). 
   <output_file>       Path to the output file to store the results (default: output_file.csv)
 
   sample input_file (must be FQDN, not IP addresses):
         somehost1.com
+        202.1.46.9
         api.somecdn.com
+        2404:6800:4006:80f::200e
         yetanotherhost.mynetwork.xyz
 
 Options:
@@ -256,6 +258,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
