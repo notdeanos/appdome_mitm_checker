@@ -8,7 +8,9 @@ NOT COVERED BY APPDOME SUPPORT
 This script performs comprehensive checks on a list of hostnames to evaluate their SSL/TLS security configurations.
 It checks for HTTPS support, ownership information, country of ownership, HSTS support, and TLS versions.
 
-Usage: python appdome_mitm_chcker.py <input_file> <output_file> [--verbose] [--delimiter <delimiter>] [--threads <thread_count>]
+Typical use case would be checking a list of hosts that trigger Appdome MiTM (Man-in-the-Middle) warnings. Most useful when there are a lot of hosts to check.
+
+Usage: python3 appdome_mitm_chcker.py <input_file> <output_file> [--verbose] [--delimiter <delimiter>] [--threads <thread_count>]
 
 Arguments:
   <input_file>        Path to the input file containing a list of hostnames to check
