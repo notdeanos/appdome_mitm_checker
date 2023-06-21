@@ -16,7 +16,7 @@ Arguments:
   <input_file>        Path to the input file containing a list of hostnames or IP addresses (IPv4 & IPv6 supported). 
   <output_file>       Path to the output file to store the results (default: output_file.csv)
 
-  sample input_file (must be FQDN, not IP addresses):
+  sample input_file (can be FQDN or IPv4/IPv6 address):
         somehost1.com
         202.1.46.9
         api.somecdn.com
