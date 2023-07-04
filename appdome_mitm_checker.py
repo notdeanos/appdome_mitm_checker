@@ -35,6 +35,8 @@ Options:
 """
 
 import sys
+import os
+import re
 import socket
 import ssl
 import ipwhois
@@ -42,6 +44,7 @@ from ipwhois import IPWhois
 import concurrent.futures
 import csv
 import logging
+from urllib.parse import urlparse
 
 # Default values for command-line arguments
 DEFAULT_OUTPUT_FILE = "output_file.csv"
@@ -50,6 +53,18 @@ DEFAULT_THREAD_COUNT = 10
 
 # Global cache to store the results of previous lookups
 HOSTNAME_CACHE = {}
+
+def remove_url_prefix(hostname):
+    if hostname.startswith("http://"):
+        return hostname[7:]
+    elif hostname.startswith("https://"):
+        return hostname[8:]
+    else:
+        return hostname
+
+def remove_url_path(hostname):
+    parsed_url = urlparse(hostname)
+    return parsed_url.netloc
 
 def get_ip_address(hostname):
     try:
@@ -187,6 +202,8 @@ def process_hostnames(input_file, output_file, delimiter, thread_count, verbose)
     with open(input_file, "r") as file:
         hostnames = file.read().splitlines()
 
+    hostnames = [remove_url_prefix(hostname) for hostname in hostnames]
+#    hostnames = [remove_url_path(hostname) for hostname in hostnames]
     total_hosts = len(hostnames)
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=thread_count) as executor:
@@ -220,14 +237,18 @@ def write_output_to_file(output_file, delimiter, results):
         writer.writerows(results)
 
 
+def print_output_file(output_file):
+    with open(output_file, "r") as file:
+        print(file.read())
+
 def main():
     if len(sys.argv) < 2 or "--help" in sys.argv:
         print(
-            "Usage: python appdome_mitm_checker.py <input_file> <output_file> [--verbose] [--delimiter <delimiter>] [--threads <thread_count>]"
+            "Usage: python appdome_mitm_checker.py <input_file or hostname(s)> <output_file> [--verbose] [--delimiter <delimiter>] [--threads <thread_count>]"
         )
         return
 
-    input_file = sys.argv[1]
+    input_arg = sys.argv[1]
     output_file = DEFAULT_OUTPUT_FILE
     delimiter = DEFAULT_DELIMITER
     thread_count = DEFAULT_THREAD_COUNT
@@ -253,7 +274,36 @@ def main():
 
     logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(levelname)s: %(message)s")
 
-    process_hostnames(input_file, output_file, delimiter, thread_count, verbose)
+    if os.path.isfile(input_arg): # Check if input argument is a file
+        process_hostnames(input_arg, output_file, delimiter, thread_count, verbose)
+    else: # Otherwise treat it as a single or multiple hostnames
+        hostnames = [h.strip() for h in re.split('[ ,]', input_arg)]
+        process_hostnames(None, output_file, delimiter, thread_count, verbose, hostnames)
+
+    if verbose:
+        print_output_file(output_file)
+
+# Modify the process_hostnames to accept an optional hostnames list
+
+def process_hostnames(input_file, output_file, delimiter, thread_count, verbose, hostnames=None):
+    if hostnames is None:
+        with open(input_file, "r") as file:
+            hostnames = file.read().splitlines()
+
+    hostnames = [remove_url_prefix(hostname) for hostname in hostnames]
+    total_hosts = len(hostnames)
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=thread_count) as executor:
+        results = []
+        for hostname, result in zip(
+            hostnames,
+            executor.map(
+                process_hostname, hostnames, [total_hosts] * total_hosts, [verbose] * total_hosts
+            ),
+        ):
+            results.append(result)
+
+    write_output_to_file(output_file, delimiter, results)
 
 
 if __name__ == "__main__":
