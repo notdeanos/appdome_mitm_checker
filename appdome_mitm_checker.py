@@ -45,6 +45,8 @@ import concurrent.futures
 import csv
 import logging
 from urllib.parse import urlparse
+import argparse
+import signal
 
 # Default values for command-line arguments
 DEFAULT_OUTPUT_FILE = "output_file.csv"
@@ -53,6 +55,11 @@ DEFAULT_THREAD_COUNT = 10
 
 # Global cache to store the results of previous lookups
 HOSTNAME_CACHE = {}
+
+def sanitize_hostname(hostname):
+    # Keep only valid characters for domain names
+    hostname = re.sub(r'[^a-zA-Z0-9.-]', '', hostname)
+    return hostname
 
 def remove_url_prefix(hostname):
     if hostname.startswith("http://"):
@@ -284,7 +291,6 @@ def main():
         print_output_file(output_file)
 
 # Modify the process_hostnames to accept an optional hostnames list
-
 def process_hostnames(input_file, output_file, delimiter, thread_count, verbose, hostnames=None):
     if hostnames is None:
         with open(input_file, "r") as file:
@@ -305,10 +311,14 @@ def process_hostnames(input_file, output_file, delimiter, thread_count, verbose,
 
     write_output_to_file(output_file, delimiter, results)
 
+# Add a signal handler
+def signal_handler(sig, frame):
+    print("\nExecution interrupted. Cleaning up...")
+    # You can perform any necessary cleanup operations here before exiting
+    sys.exit(0)
+
+# Register the signal handler
+signal.signal(signal.SIGINT, signal_handler)
 
 if __name__ == "__main__":
     main()
-
-
-
-
