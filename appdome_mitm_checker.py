@@ -81,9 +81,9 @@ def get_ip_address(hostname):
             if ip_version == socket.AF_INET or ip_version == socket.AF_INET6:
                 ip_address = sockaddr[0]
                 return ip_address
-    except socket.gaierror:
+    except (socket.gaierror, UnicodeError) as e:
+        logging.warning(f'Error resolving hostname "{hostname}": {str(e)}')
         return None
-
 
 def get_owner(ip_address):
     try:
