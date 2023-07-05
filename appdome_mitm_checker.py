@@ -238,7 +238,7 @@ def write_output_to_file(output_file, delimiter, results):
                 "Provider Owner",
                 "HTTPS Check",
                 "TLS Version",
-                "Failure Reason",
+                "Failure Reason (if any)",
             ]
         )
         writer.writerows(results)
