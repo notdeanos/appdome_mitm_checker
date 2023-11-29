@@ -13,10 +13,10 @@ Typical use case would be checking a list of hosts that trigger Appdome MiTM (Ma
 Usage: python3 appdome_mitm_chcker.py <input_file> <output_file> [--verbose] [--delimiter <delimiter>] [--threads <thread_count>]
 
 Arguments:
-  <input_file>        Path to the input file containing a list of hostnames or IP addresses (IPv4 & IPv6 supported). 
+  <input_file>        Path to the input file containing a list of hostnames or IP addresses (IPv4 & IPv6 supported), or a spreadsheet with 'Host: xxx' entries.
   <output_file>       Path to the output file to store the results (default: output_file.csv)
 
-  sample input_file (can be FQDN or IPv4/IPv6 address):
+  sample input_file (can be FQDN or IPv4/IPv6 address, or a spreadsheet):
         somehost1.com
         202.1.46.9
         api.somecdn.com
@@ -28,9 +28,19 @@ Options:
   --delimiter         Delimiter to use in the output file (default: tab)
   --threads           Number of threads to use for concurrent execution (default: 10)
 
- Required Python packages:
+Required Python packages:
  - ipwhois: Used for IP address and ownership lookups
    Install with: pip install ipwhois
+ - pandas: Used for reading data from spreadsheets
+   Install with: pip install pandas
+ - socket: Standard library module for network interface
+ - ssl: Standard library module for handling SSL/TLS connections
+ - concurrent.futures: Standard library module for concurrent execution
+ - csv: Standard library module for reading and writing CSV files
+ - logging: Standard library module for logging
+ - urllib.parse: Standard library module for URL parsing
+ - argparse: Standard library module for parsing command-line options
+ - signal: Standard library module for handling Unix signals
 
 """
 
@@ -47,6 +57,8 @@ import logging
 from urllib.parse import urlparse
 import argparse
 import signal
+import pandas as pd
+import json
 
 # Default values for command-line arguments
 DEFAULT_OUTPUT_FILE = "output_file.csv"
@@ -95,18 +107,6 @@ def get_owner(ip_address):
     except Exception:
         return None
 
-
-def get_owner_from_ip(ip_address):
-    try:
-        obj = ipwhois.IPWhois(ip_address)
-        result = obj.lookup_rdap()
-        if 'asn_description' in result:
-            owner = result['asn_description']
-            return owner
-    except Exception:
-        return None
-
-
 def get_country(ip_address):
     try:
         obj = IPWhois(ip_address)
@@ -116,7 +116,6 @@ def get_country(ip_address):
             return country
     except Exception:
         return None
-
 
 def check_https_support(hostname):
     try:
@@ -137,7 +136,6 @@ def check_https_support(hostname):
     except Exception as e:
         return False, str(e)
 
-
 def process_hostname(hostname, total_hosts, verbose):
     if hostname in HOSTNAME_CACHE:
         return HOSTNAME_CACHE[hostname]
@@ -153,20 +151,6 @@ def process_hostname(hostname, total_hosts, verbose):
     if ip_address:
         owner = get_owner(ip_address)
         if owner:
-            country = get_country(ip_address)
-            resolved_domain = socket.getfqdn(hostname)
-            supports_https, failure_reason = check_https_support(hostname)
-            if supports_https:
-                if isinstance(supports_https, str):
-                    https_support = "Passed"
-                    tls_version = supports_https
-                else:
-                    https_support = "Passed"
-
-    if not owner:
-        owner_from_ip = get_owner_from_ip(ip_address)
-        if owner_from_ip:
-            owner = owner_from_ip
             country = get_country(ip_address)
             resolved_domain = socket.getfqdn(hostname)
             supports_https, failure_reason = check_https_support(hostname)
@@ -203,14 +187,35 @@ def process_hostname(hostname, total_hosts, verbose):
 
     return line_output
 
+# New function to read hostnames from a spreadsheet
+def read_hostnames_from_spreadsheet(file_path):
+    try:
+        df = pd.read_excel(file_path)  # Reading the spreadsheet into a DataFrame
+        hostnames_set = set()  # Using a set to avoid duplicates
 
-def process_hostnames(input_file, output_file, delimiter, thread_count, verbose):
-    hostnames = []
-    with open(input_file, "r") as file:
-        hostnames = file.read().splitlines()
+        # Regex pattern to find 'Host: <hostname>'
+        pattern = re.compile(r"Host:\s+([^\s]+)")
+
+        for value in df.to_numpy().flatten():  # Flattening the DataFrame to iterate over all cells
+            if isinstance(value, str):
+                # Search for the 'Host:' pattern and extract the hostname
+                match = pattern.search(value)
+                if match:
+                    hostname = match.group(1).strip()  # Extract the hostname
+                    if hostname not in hostnames_set:  # Check if the hostname is already in the set
+                        hostnames_set.add(hostname)  # Add the hostname to the set
+
+        return list(hostnames_set)  # Convert the set back to a list to return
+    except Exception as e:
+        logging.error(f"Error reading spreadsheet: {e}")
+        return []
+
+def process_hostnames(input_file, output_file, delimiter, thread_count, verbose, hostnames=None):
+    if hostnames is None:
+        with open(input_file, "r") as file:
+            hostnames = file.read().splitlines()
 
     hostnames = [remove_url_prefix(hostname) for hostname in hostnames]
-#    hostnames = [remove_url_path(hostname) for hostname in hostnames]
     total_hosts = len(hostnames)
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=thread_count) as executor:
@@ -224,7 +229,6 @@ def process_hostnames(input_file, output_file, delimiter, thread_count, verbose)
             results.append(result)
 
     write_output_to_file(output_file, delimiter, results)
-
 
 def write_output_to_file(output_file, delimiter, results):
     with open(output_file, "w", newline="") as file:
@@ -242,7 +246,6 @@ def write_output_to_file(output_file, delimiter, results):
             ]
         )
         writer.writerows(results)
-
 
 def print_output_file(output_file):
     with open(output_file, "r") as file:
@@ -281,9 +284,14 @@ def main():
 
     logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(levelname)s: %(message)s")
 
-    if os.path.isfile(input_arg): # Check if input argument is a file
-        process_hostnames(input_arg, output_file, delimiter, thread_count, verbose)
-    else: # Otherwise treat it as a single or multiple hostnames
+    if os.path.isfile(input_arg):
+        if input_arg.lower().endswith(('.xls', '.xlsx')):  # Check if input file is a spreadsheet
+            hostnames = read_hostnames_from_spreadsheet(input_arg)
+        else:
+            with open(input_arg, "r") as file:
+                hostnames = file.read().splitlines()
+        process_hostnames(None, output_file, delimiter, thread_count, verbose, hostnames)
+    else:
         hostnames = [h.strip() for h in re.split('[ ,]', input_arg)]
         process_hostnames(None, output_file, delimiter, thread_count, verbose, hostnames)
 
@@ -322,3 +330,4 @@ signal.signal(signal.SIGINT, signal_handler)
 
 if __name__ == "__main__":
     main()
+
